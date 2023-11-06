@@ -1,0 +1,137 @@
+#!/bin/sh
+
+set -eu
+
+RESOLV_CONF="/etc/resolv.conf"
+
+log() {
+    echo "$@" >&2
+}
+
+for arg; do
+    case "$arg" in
+        -d)
+            DRYRUN="echo"
+        ;;
+
+         *)
+            # Eg. /mnt/digitalocean_meta_data.json
+            METADATA="$arg"
+            break
+        ;;
+    esac
+done
+
+[ -f "$METADATA" ] || {
+    echo "File '$METADATA' not found!" >&2
+    exit 1
+}
+
+find_if_by_mac() (
+    mac="$1"
+
+    cd /sys/class/net
+
+    # wlan0/address:b4:8c:9d:d4:77:f7
+    # eth0/address:ff:ff:ff:ff:ff:ff
+
+    # shellcheck disable=SC2046
+    set -- $(
+        grep -F "$mac" -- */address | cut -d / -f1
+    )
+
+    dev="${1:?No matching interface}"
+    shift
+
+    # Unreachable, but just in-case we were passed a garbage (partial) string
+    # that would match multiple interface's addresses
+    for extra; do
+        log "Found extra match '$extra' for mac!"
+        exit 1
+    done
+
+    echo "$dev"
+)
+
+# $1: Netmask, eg 255.255.240.0
+# Output: eg 20
+mask_to_cidr() (
+    IFS="."
+
+    # shellcheck disable=SC2086
+    set -- $1
+
+    mask=$((
+        $(($1 << 24)) |
+        $(($2 << 16)) |
+        $(($3 << 8)) |
+        $(($4 << 0))
+    ))
+
+    popcount=0
+
+    # Test the number of set bits
+    while [ "$mask" -gt 0 ]; do
+        popcount=$(( popcount + $(( mask & 1 )) ))
+        mask=$(( mask >> 1 ))
+    done
+
+    echo "$popcount"
+)
+
+# $1: [private|public]
+# $2: [ipv4|ipv6]
+_up_if_inner() (
+    typ="$1"
+    proto="$2"
+
+    log "Setting up $typ $proto interface"
+
+    # shellcheck disable=SC2046
+    set -- $(
+        jq -r \
+            ".interfaces.${typ}[0] | .mac, .${proto}.gateway, .${proto}.ip_address, .${proto}.netmask" \
+            "$METADATA"
+    )
+
+    mac="$1"
+    gateway="$2"
+    ip="$3"
+    netmask="$4"
+
+    log "Interface MAC: $mac, Gateway: $gateway, Ip: $ip, Netmask: $netmask"
+
+    cidr="$(mask_to_cidr "$netmask")"
+    if="$(find_if_by_mac "$mac")"
+
+    log "Configuring for dev '$if', CIDR: $cidr"
+
+    ${DRYRUN:-} ip link set "$if" up
+    ${DRYRUN:-} ip address add "$ip/$cidr" broadcast + dev "$if"
+    ${DRYRUN:-} ip route add default via "$gateway" dev "$if"
+)
+
+up_if() (
+    log "Setting up interfaces"
+
+    _up_if_inner public ipv4
+    _up_if_inner private ipv4
+)
+
+up_dns() (
+    log "Setting up DNS at $RESOLV_CONF"
+
+    jq -r .dns.nameservers[] "$METADATA" | while read -r dns; do
+        log "Got nameserver $dns"
+        echo "nameserver $dns"
+    done | {
+        if [ -z "${DRYRUN:-}" ]; then
+            tee "$RESOLV_CONF" > /dev/null
+        else
+            cat
+        fi
+    }
+)
+
+up_if
+up_dns
