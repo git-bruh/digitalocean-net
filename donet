@@ -110,13 +110,18 @@ _up_if_inner() (
 
     ${NON_DRY_RUN-echo} ip link set "$if" up
     ${NON_DRY_RUN-echo} ip address add "$ip/$cidr" broadcast + dev "$if"
-    ${NON_DRY_RUN-echo} ip route add default via "$gateway" dev "$if"
+
+    if [ "$proto" = "ipv4" ] && [ "$typ" = "public" ]; then
+        ${NON_DRY_RUN-echo} ip route add default via "$gateway" dev "$if"
+    fi
 )
 
 up_if() (
     log "Setting up interfaces"
 
     _up_if_inner public ipv4
+    _up_if_inner public anchor_ipv4
+
     _up_if_inner private ipv4
 )
 
