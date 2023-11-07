@@ -1,6 +1,6 @@
 # digitalocean-net
 
-Sets up the static network configuration based on the [DigitalOcean metadata file](https://docs.digitalocean.com/reference/api/metadata-api/#operation/getMetadata)
+Sets up the static network configuration based on the [DigitalOcean metadata file](https://docs.digitalocean.com/reference/api/metadata-api/#operation/getMetadata) without a `/etc/network/interfaces` file and `ifup`
 
 # Usage
 
