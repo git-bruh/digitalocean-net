@@ -2,7 +2,8 @@
 
 set -eu
 
-RESOLV_CONF="/etc/resolv.conf"
+export RESOLV_CONF="/etc/resolv.conf"
+export NON_DRY_RUN=""
 
 log() {
     echo "$@" >&2
@@ -11,7 +12,8 @@ log() {
 for arg; do
     case "$arg" in
         -d)
-            DRYRUN="echo"
+            log "Run with '$0 2>/dev/null' to just get the operations that will be performed"
+            unset NON_DRY_RUN
         ;;
 
          *)
@@ -106,9 +108,9 @@ _up_if_inner() (
 
     log "Configuring for dev '$if', CIDR: $cidr"
 
-    ${DRYRUN:-} ip link set "$if" up
-    ${DRYRUN:-} ip address add "$ip/$cidr" broadcast + dev "$if"
-    ${DRYRUN:-} ip route add default via "$gateway" dev "$if"
+    ${NON_DRY_RUN-echo} ip link set "$if" up
+    ${NON_DRY_RUN-echo} ip address add "$ip/$cidr" broadcast + dev "$if"
+    ${NON_DRY_RUN-echo} ip route add default via "$gateway" dev "$if"
 )
 
 up_if() (
@@ -125,10 +127,10 @@ up_dns() (
         log "Got nameserver $dns"
         echo "nameserver $dns"
     done | {
-        if [ -z "${DRYRUN:-}" ]; then
-            tee "$RESOLV_CONF" > /dev/null
-        else
+        if [ "${NON_DRY_RUN-1}" = 1 ]; then
             cat
+        else
+            tee "$RESOLV_CONF" > /dev/null
         fi
     }
 )
